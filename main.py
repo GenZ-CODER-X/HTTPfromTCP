@@ -1,4 +1,6 @@
 import socket
+
+
 def get_lines_channel(conn:socket.socket):
     current_line=""
     while True:
@@ -28,7 +30,7 @@ def server():
                 print("Connection acquired from",addr)
                 try:
                     with conn:
-                        for part_lines in get_lines_channel(conn):
+                        for part_lines in (conn):
                             print(part_lines)
                 finally:
                     print("Connection is closed")

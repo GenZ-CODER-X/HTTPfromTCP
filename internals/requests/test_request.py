@@ -100,7 +100,7 @@ def test_only_request_line_is_consumed():
     expected_line = b"GET /coffee HTTP/1.1\r\n"
 
     assert consumed == len(expected_line)
-    assert consumed==expected_line
+    assert result==expected_line
     assert result is not None
     assert data[consumed:] == b"Host: localhost:42069\r\n"
 
