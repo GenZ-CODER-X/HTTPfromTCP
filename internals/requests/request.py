@@ -8,7 +8,7 @@ class RequestLine(BaseModel):
     http_version:str
 
 class ParserState(Enum):
-    INITIALIZED="intialized"
+    INITIALIZED="initialized"
     DONE="done"
 
 class Request(BaseModel):
@@ -42,11 +42,15 @@ def parser_request_line(data:bytes)->tuple[int,RequestLine|None]:
     if len(parts_request_line)!=3 or any(not part for part in parts_request_line):
         raise ValueError("Invalid request line:expected 3 components")
     
+    method,target,version=parts_request_line
+
+    request_line_validator(method,version)
+
     Req_line=RequestLine(
-        method=parts_request_line[0],
-        request_target=parts_request_line[1],
-        http_version=1.1)
-    request_line_validator(Req_line.method,Req_line.http_version)
+        method=method,
+        request_target=target,
+        http_version="1.1")
+    
     return line_end+2,Req_line
 
 def request_line_validator(method:str,version:str)->None:
@@ -56,10 +60,9 @@ def request_line_validator(method:str,version:str)->None:
     if version != "HTTP/1.1":
         raise ValueError("Not a valid HTTP version")
 
-def request_from_reader(reader)->Request:
+def request_from_reader(reader,chunk_size:int=8)->Request:
     request=Request()
     buffer=bytearray()
-    chunk_size=8
     while request.state!=ParserState.DONE:
         chunk=reader.read(chunk_size)
         if not chunk:
