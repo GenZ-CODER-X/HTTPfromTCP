@@ -1,5 +1,6 @@
 import socket
 from internals.requests.request import request_from_reader
+import time
 
 def get_lines_channel(conn:socket.socket):
     current_line=""
@@ -20,7 +21,8 @@ def get_lines_channel(conn:socket.socket):
         yield current_line
 
 def server():
-    with socket.socket() as s:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) #This allows me to use TCP back to back from same address
         s.bind(('localhost',42069))
         s.listen(1)
         print("Waiting for connection")
@@ -36,6 +38,8 @@ def server():
                             print(f"- Method: {request.request_line.method}")
                             print(f"- Target: {request.request_line.request_target}")
                             print(f"- Version: {request.request_line.http_version}")
+                            print(f"\nHeaders:{request.headers_dict}")
+
                 finally:
                     print("Connection is closed")
         except KeyboardInterrupt:

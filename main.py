@@ -1,6 +1,5 @@
 import socket
 
-
 def get_lines_channel(conn:socket.socket):
     current_line=""
     while True:

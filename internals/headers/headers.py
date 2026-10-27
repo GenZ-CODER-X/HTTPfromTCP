@@ -63,15 +63,19 @@ def head_parser(data,
     return consumed,parsed_header
 
 def req_from_reader(reader,chunk_size:int=8)->Headers:
+    print("Entered into the Headers")
+    print(reader.read(chunk_size))
     header=Headers()
     buffer=bytearray()
     while header.state!=ParserState.DONE:
         chunk=reader.read(chunk_size)
+        print(chunk)
         if not chunk:
             raise ValueError("Unexpected EOF before request line was complete")
         if isinstance(chunk,str):
             chunk=chunk.encode('utf-8')
         buffer.extend(chunk)
+        print(buffer)
         consumed=header.parser(bytes(buffer))
         if consumed>0:
             del buffer[:consumed]

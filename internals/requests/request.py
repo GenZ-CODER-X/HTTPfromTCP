@@ -1,31 +1,69 @@
-from pydantic import BaseModel
+from pydantic import BaseModel,Field
 from enum import Enum
 import re
+from internals.headers import headers
 
 class RequestLine(BaseModel):
     method:str
     request_target:str
     http_version:str
 
-class ParserState(Enum):
+class RequestState(Enum):
     INITIALIZED="initialized"
+    PARSING_HEADERS = "parsing_headers"
     DONE="done"
 
 class Request(BaseModel):
     request_line:RequestLine |None=None
-    state:ParserState=ParserState.INITIALIZED
+    state:RequestState=RequestState.INITIALIZED
+    headers_dict:headers.Headers=Field(
+        default_factory=headers.Headers
+    )
 
     def parse(self,data:bytes)->int:
-        if self.state== ParserState.DONE:
-            return 0
-        consumed,request_line=parser_request_line(data)
+        total_bytes_parsed = 0
+        while self.state != RequestState.DONE:
+            consumed = self.parse_single(
+                data[total_bytes_parsed:]
+            )
 
-        if consumed==0:
-            return 0
-        self.request_line=request_line
-        self.state=ParserState.DONE
+            if consumed == 0:
+                break
 
-        return consumed
+            total_bytes_parsed += consumed
+
+        return total_bytes_parsed
+        # total_bytes_parsed=0
+        # if self.state== ParserState.DONE and self.headers.state==ParserState.DONE:
+        #     return 0
+        # consumed,request_line=parser_request_line(data)
+
+        # if consumed==0:
+        #     return 0
+        # self.request_line=request_line
+        # self.state=ParserState.DONE
+        # return consumed
+    def parse_single(self, data: bytes) -> int:
+        if self.state == RequestState.INITIALIZED:
+            consumed, request_line = parser_request_line(data)
+
+            if consumed == 0:
+                return 0
+
+            self.request_line = request_line
+            self.state = RequestState.PARSING_HEADERS
+            return consumed
+
+        if self.state == RequestState.PARSING_HEADERS:
+            consumed = self.headers_dict.parser(data)
+
+            if consumed == 0:
+                return 0
+
+            self.state = RequestState.DONE
+            return consumed
+
+        return 0
 
 def parser_request_line(data:bytes)->tuple[int,RequestLine|None]:
     line_end=data.find(b"\r\n")
@@ -63,8 +101,12 @@ def request_line_validator(method:str,version:str)->None:
 def request_from_reader(reader,chunk_size:int=8)->Request:
     request=Request()
     buffer=bytearray()
-    while request.state!=ParserState.DONE:
-        chunk=reader.read(chunk_size)
+    # Socket makefile readers support read1(); retain compatibility
+    # with reader objects that only provide read().
+    read_chunk = getattr(reader, "read1", reader.read)
+    while request.state!=RequestState.DONE:
+        chunk=read_chunk(chunk_size)
+        print(chunk)
         if not chunk:
             raise ValueError("Unexpected EOF before request line was complete")
         if isinstance(chunk,str):
@@ -73,6 +115,8 @@ def request_from_reader(reader,chunk_size:int=8)->Request:
         consumed=request.parse(bytes(buffer))
         if consumed>0:
             del buffer[:consumed]
+    print(request.request_line)
+    print(chunk)
     return request
 
     # raw_request = reader.read()
