@@ -8,10 +8,13 @@ class RequestLine(BaseModel):
     request_target:str
     http_version:str
 
+#The most important is to maintain state machine each and everytime 
 class RequestState(Enum):
     INITIALIZED="initialized"
     PARSING_HEADERS = "parsing_headers"
+    PARSING_BODY="parsing-body"
     DONE="done"
+
 
 class Request(BaseModel):
     request_line:RequestLine |None=None
@@ -19,6 +22,7 @@ class Request(BaseModel):
     headers_dict:headers.Headers=Field(
         default_factory=headers.Headers
     )
+    body: bytes = b""
 
     def parse(self,data:bytes)->int:
         total_bytes_parsed = 0
@@ -46,24 +50,46 @@ class Request(BaseModel):
     def parse_single(self, data: bytes) -> int:
         if self.state == RequestState.INITIALIZED:
             consumed, request_line = parser_request_line(data)
-
             if consumed == 0:
                 return 0
-
             self.request_line = request_line
             self.state = RequestState.PARSING_HEADERS
             return consumed
-
         if self.state == RequestState.PARSING_HEADERS:
             consumed = self.headers_dict.parser(data)
-
             if consumed == 0:
                 return 0
-
-            self.state = RequestState.DONE
+            self.state=RequestState.PARSING_BODY
             return consumed
+        if self.state == RequestState.PARSING_BODY:
+            content_length = self.headers_dict.get_key("Content-Length")
+
+            # As of now, no Content-Length means no body.
+            if content_length is None:
+                self.state=RequestState.DONE
+                return 0
+
+            try:
+                expected_length = int(content_length)
+            except ValueError as exc:
+                raise ValueError("Invalid Content-Length") from exc
+
+            if expected_length < 0:
+                raise ValueError("Invalid Content-Length")
+
+            self.body += data
+
+            if len(self.body) > expected_length:
+                raise ValueError("Body exceeds Content-Length")
+
+            if len(self.body) == expected_length:
+                self.state = RequestState.DONE
+
+            # All available bytes have been added to the body.
+            return len(data)
 
         return 0
+
 
 def parser_request_line(data:bytes)->tuple[int,RequestLine|None]:
     line_end=data.find(b"\r\n")
@@ -99,6 +125,7 @@ def request_line_validator(method:str,version:str)->None:
         raise ValueError("Not a valid HTTP version")
 
 def request_from_reader(reader,chunk_size:int=8)->Request:
+    count=0
     request=Request()
     buffer=bytearray()
     # Socket makefile readers support read1(); retain compatibility
@@ -106,17 +133,15 @@ def request_from_reader(reader,chunk_size:int=8)->Request:
     read_chunk = getattr(reader, "read1", reader.read)
     while request.state!=RequestState.DONE:
         chunk=read_chunk(chunk_size)
-        print(chunk)
         if not chunk:
-            raise ValueError("Unexpected EOF before request line was complete")
+            raise ValueError("Unexpected EOF before request was complete")
         if isinstance(chunk,str):
             chunk=chunk.encode('utf-8')
         buffer.extend(chunk)
         consumed=request.parse(bytes(buffer))
         if consumed>0:
             del buffer[:consumed]
-    print(request.request_line)
-    print(chunk)
+        count+=1
     return request
 
     # raw_request = reader.read()

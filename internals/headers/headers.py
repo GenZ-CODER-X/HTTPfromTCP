@@ -10,6 +10,7 @@ class Headers(BaseModel):
     headers:dict[str,str]= Field(default_factory=dict)
     state:ParserState=ParserState.INITIALIZED
 
+
     def parser(self,data)->int:
         if self.state==ParserState.DONE:
             return 0
@@ -19,6 +20,9 @@ class Headers(BaseModel):
         self.headers=parsed_headers
         self.state=ParserState.DONE
         return consumed
+    def get_key(self, key: str) -> str | None:
+        print(self.headers.get(key.lower()))
+        return self.headers.get(key.lower())
 
 def head_parser(data,
                 existing_headers:dict[str,str]|None=None
@@ -63,23 +67,21 @@ def head_parser(data,
     return consumed,parsed_header
 
 def req_from_reader(reader,chunk_size:int=8)->Headers:
-    print("Entered into the Headers")
-    print(reader.read(chunk_size))
     header=Headers()
     buffer=bytearray()
     while header.state!=ParserState.DONE:
         chunk=reader.read(chunk_size)
-        print(chunk)
         if not chunk:
             raise ValueError("Unexpected EOF before request line was complete")
         if isinstance(chunk,str):
             chunk=chunk.encode('utf-8')
         buffer.extend(chunk)
-        print(buffer)
         consumed=header.parser(bytes(buffer))
         if consumed>0:
             del buffer[:consumed]
     return header
+
+
 
 
 
