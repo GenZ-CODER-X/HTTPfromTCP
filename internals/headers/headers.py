@@ -21,7 +21,6 @@ class Headers(BaseModel):
         self.state=ParserState.DONE
         return consumed
     def get_key(self, key: str) -> str | None:
-        print(self.headers.get(key.lower()))
         return self.headers.get(key.lower())
 
 def head_parser(data,

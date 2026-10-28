@@ -1,7 +1,8 @@
-from pydantic import BaseModel,Field
+from pydantic import BaseModel,Field,PrivateAttr
 from enum import Enum
 import re
 from internals.headers import headers
+from typing import BinaryIO
 
 class RequestLine(BaseModel):
     method:str
@@ -15,14 +16,14 @@ class RequestState(Enum):
     PARSING_BODY="parsing-body"
     DONE="done"
 
-
 class Request(BaseModel):
     request_line:RequestLine |None=None
     state:RequestState=RequestState.INITIALIZED
     headers_dict:headers.Headers=Field(
         default_factory=headers.Headers
     )
-    body: bytes = b""
+    # body: bytes = b""
+    _body_reader:BinaryIO | None = PrivateAttr(default=None)
 
     def parse(self,data:bytes)->int:
         total_bytes_parsed = 0
@@ -59,36 +60,39 @@ class Request(BaseModel):
             consumed = self.headers_dict.parser(data)
             if consumed == 0:
                 return 0
-            self.state=RequestState.PARSING_BODY
+            # self.state=RequestState.PARSING_BODY
+            self.state = RequestState.DONE
+            data_remaining=data[consumed:]
+
             return consumed
-        if self.state == RequestState.PARSING_BODY:
-            content_length = self.headers_dict.get_key("Content-Length")
-
-            # As of now, no Content-Length means no body.
-            if content_length is None:
-                self.state=RequestState.DONE
-                return 0
-
-            try:
-                expected_length = int(content_length)
-            except ValueError as exc:
-                raise ValueError("Invalid Content-Length") from exc
-
-            if expected_length < 0:
-                raise ValueError("Invalid Content-Length")
-
-            self.body += data
-
-            if len(self.body) > expected_length:
-                raise ValueError("Body exceeds Content-Length")
-
-            if len(self.body) == expected_length:
-                self.state = RequestState.DONE
-
-            # All available bytes have been added to the body.
-            return len(data)
-
         return 0
+        # if self.state == RequestState.PARSING_BODY:
+        #     content_length = self.headers_dict.get_key("Content-Length")
+
+        #     # As of now, no Content-Length means no body.
+        #     if content_length is None:
+        #         self.state=RequestState.DONE
+        #         return 0
+
+        #     try:
+        #         expected_length = int(content_length)
+        #     except ValueError as exc:
+        #         raise ValueError("Invalid Content-Length") from exc
+
+        #     if expected_length < 0:
+        #         raise ValueError("Invalid Content-Length")
+
+        #     self.body += data
+
+        #     if len(self.body) > expected_length:
+        #         raise ValueError("Body exceeds Content-Length")
+
+        #     if len(self.body) == expected_length:
+        #         self.state = RequestState.DONE
+
+        #     # All available bytes have been added to the body.
+        #     return len(data)
+        # return 0
 
 
 def parser_request_line(data:bytes)->tuple[int,RequestLine|None]:
@@ -124,7 +128,7 @@ def request_line_validator(method:str,version:str)->None:
     if version != "HTTP/1.1":
         raise ValueError("Not a valid HTTP version")
 
-def request_from_reader(reader,chunk_size:int=8)->Request:
+def request_from_reader(reader,chunk_size:int=8)->tuple[Request,str]:
     count=0
     request=Request()
     buffer=bytearray()
@@ -141,15 +145,48 @@ def request_from_reader(reader,chunk_size:int=8)->Request:
         consumed=request.parse(bytes(buffer))
         if consumed>0:
             del buffer[:consumed]
-        count+=1
-    return request
+    request._body_reader=reader
+    return request,buffer
 
     # raw_request = reader.read()
     # request_line = parser_request_line(raw_request)
     # return Request(request_line=request_line)
 
     
+def body_parser(request:Request,buffer,chunk_size=65536):
+    content_length = request.headers_dict.headers.get("content-length")
+    if content_length is None:
+        return None
+    remaining_length=int(content_length)
+    print(remaining_length)
+    file=open("body_file","w+b")
+    try:
+        if buffer:
+            if len(buffer) > remaining_length:
+                raise ValueError("Body exceeds Content-Length")
+            file.write(buffer)
+            remaining_length -= len(buffer)
+            print(remaining_length)
+            
+        while remaining_length > 0:
+            chunk = request._body_reader.read(
+                    min(chunk_size, remaining_length)
+                )
+            if not chunk:
+                print("Incomplete Body")
+                raise EOFError("Incomplete request body")
+            remaining_length -= len(chunk)
+            file.write(chunk)
+        file.seek(0)
+        return file
+    except Exception:
+        print(Exception)
+        file.close()
+        raise ValueError("Error has occured on getting the body")
+    
 
+
+            
 
 
 
