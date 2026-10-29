@@ -1,6 +1,7 @@
 import socket
-from internals.requests.request import request_from_reader,body_parser
+from internals.requests.request import request_from_reader,body_parser,handle_req
 import time
+from internals.response.response import serve_response
 
 def get_lines_channel(conn:socket.socket):
     current_line=""
@@ -52,10 +53,25 @@ def server():
                                     print(body_file.read())  # Returns bytes
                                 finally:
                                     body_file.close()
+                            # handle_req(conn,request)
+                            status_line,response_headers=serve_response(request)
+                            body = b"Hello"
+                            response = (
+                                    status_line.encode("utf-8")
+                                    + b"\r\n"
+                                    + response_headers.encode("utf-8")
+                                    + b"\r\n"
+                                    + b"\r\n"
+                                    + body
+                                )
+                            conn.sendall(response)
                 finally:
+
                     print("Connection is closed")
+
         except KeyboardInterrupt:
             print("Server Shutdown")
+
 
 if __name__=="__main__":
     server()

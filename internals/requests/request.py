@@ -3,6 +3,7 @@ from enum import Enum
 import re
 from internals.headers import headers
 from typing import BinaryIO
+import json
 
 class RequestLine(BaseModel):
     method:str
@@ -184,7 +185,22 @@ def body_parser(request:Request,buffer,chunk_size=65536):
         file.close()
         raise ValueError("Error has occured on getting the body")
     
+def handle_req(client,request:Request):
+    # req_line="201"+request.request_line.method+request.request_line.request_target+request.request_line.http_version
+    # headers=json.dumps(request.headers_dict)
+    # data_sending=f"\nReceived_req"
+    # response=f"{req_line}\n{headers}\n"
+    response = (
+        b"HTTP/1.1 200 OK\r\n"
+        b"Content-Type: text/plain\r\n"
+        b"\r\n"
+        b"Hello World!\n"
+    )
 
+    try:
+        client.sendall(response)
+    finally:
+        client.close()
 
             
 

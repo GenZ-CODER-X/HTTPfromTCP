@@ -1,9 +1,4 @@
 __pycache__/
 *.py[cod]
 .venv/
-.pytest_cache/
-# Python generated files
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.venv/
+.pytest_cache/git rm -r --cached internals/headers/__pycache__ internals/requests/__pycache__ tcplistener/__pycache__
