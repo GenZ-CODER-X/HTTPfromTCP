@@ -51,11 +51,12 @@ def server():
                             if body_file is not None:
                                 try:
                                     print(body_file.read())  # Returns bytes
-                                finally:
-                                    body_file.close()
+                                except LookupError:
+                                    raise LookupError
+                        
                             # handle_req(conn,request)
                             status_line,response_headers=serve_response(request)
-                            body = b"Hello"
+                            body=b"Here is your response"
                             response = (
                                     status_line.encode("utf-8")
                                     + b"\r\n"
