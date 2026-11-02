@@ -1,10 +1,16 @@
 from enum import Enum
 from internals.requests.request import Request
+from pydantic import BaseModel
+from io import BytesIO
 
 class StatusCode(Enum):
-    OK = 200
-    BAD_REQUEST = 400
-    INTERNAL_SERVER_ERROR = 500
+    200 ="OK"
+    400="BAD_REQUEST "
+    500="INTERNAL_SERVER_ERROR"
+
+class HandleError(BaseModel):
+    status_code:StatusCode
+    message:str
 
 def serve_response(Request:Request)->tuple[str,str]:
     status_line = (
@@ -20,7 +26,25 @@ def serve_response(Request:Request)->tuple[str,str]:
     )
     return status_line,response_headers
 
+def app_handler(w:BytesIO,request:Request)->HandleError|None:
+    path=request.request_line.request_target
+    if path=="/yourproblem":
+        error=write_error(StatusCode(200))
+        return error
+    if path == "/myproblem":
+        error=write_error(StatusCode(400))
+        return HandleError(
+            status_code=500,
+            message="Woopsie, my bad\n"
+        )
+    w.writelines(b"All good frfr\n")
+    return None
 
+def write_error(status_code:StatusCode,)->BytesIO:
+    HandleError(status_code.name,status_code.value)
+    w=BytesIO()
+    w.write(HandleError.message)
+    return w
 
 
 
