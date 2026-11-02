@@ -2,49 +2,85 @@ from enum import Enum
 from internals.requests.request import Request
 from pydantic import BaseModel
 from io import BytesIO
+from http import HTTPStatus
 
 class StatusCode(Enum):
-    200 ="OK"
-    400="BAD_REQUEST "
-    500="INTERNAL_SERVER_ERROR"
+    OK=200 
+    BAD_REQUEST = 400
+    INTERNAL_SERVER_ERROR=500
 
-class HandleError(BaseModel):
+class HandlerError(BaseModel):
     status_code:StatusCode
     message:str
 
-def serve_response(Request:Request)->tuple[str,str]:
+def serve_response(Request:Request,response_buffer:BytesIO)->tuple[str,str]:
     status_line = (
         f"HTTP/{Request.request_line.http_version} "
         f"{StatusCode.OK.value} "
         f"{StatusCode.OK.name}"
     )
-    body=b"Here is your response"
+    body=response_buffer.getvalue()
     content_type = "text/plain"
     response_headers = (
         f"Content-Type: {content_type}\r\n"
         f"Content-Length: {len(body)}"
     )
-    return status_line,response_headers
+    response = (status_line.encode("utf-8")
+                        + b"\r\n"
+                        + response_headers.encode("utf-8")
+                        + b"\r\n"
+                        + b"\r\n"
+                        + body
+                        )
+    return response
 
-def app_handler(w:BytesIO,request:Request)->HandleError|None:
+def app_handler(w:BytesIO,request:Request)->HandlerError|None:
     path=request.request_line.request_target
-    if path=="/yourproblem":
-        error=write_error(StatusCode(200))
-        return error
+    if path == "/yourproblem":
+        return HandlerError(
+            status_code=StatusCode.BAD_REQUEST,
+            message="Your problem is not my problem\n"
+        )
     if path == "/myproblem":
-        error=write_error(StatusCode(400))
-        return HandleError(
-            status_code=500,
+        return HandlerError(
+            status_code=StatusCode.INTERNAL_SERVER_ERROR,
             message="Woopsie, my bad\n"
         )
-    w.writelines(b"All good frfr\n")
+    body="All good frfr\n"
+    w.write(body.encode('utf-8'))
     return None
 
-def write_error(status_code:StatusCode,)->BytesIO:
-    HandleError(status_code.name,status_code.value)
+#Need to make write_error to write complete error http_response
+def write_error(error:HandlerError,http_version)->BytesIO:
+    body=error.message.encode("utf-8")
+    status = HTTPStatus(error.status_code.value)
+    error_response_line=(
+        f"HTTP/{http_version} "
+        f"{status.value} "
+        f"{status.phrase}"
+    )
+    
+    content_type="text/plain"
+    response_headers=(
+        f"Content-Type: {content_type}\r\n"
+        f"Content-Length: {len(body)}"
+    )
+    error_response=response = (
+                                error_response_line.encode("utf-8")
+                                + b"\r\n"
+                                + response_headers.encode("utf-8")
+                                + b"\r\n"
+                                + b"\r\n"
+                                + body
+                                )
     w=BytesIO()
-    w.write(HandleError.message)
+    w.write(error_response)
     return w
+
+
+
+
+
 
 
 

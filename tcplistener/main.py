@@ -1,7 +1,8 @@
 import socket
 from internals.requests.request import request_from_reader,body_parser,handle_req
 import time
-from internals.response.response import serve_response
+from internals.response.response import serve_response,app_handler,write_error
+from io import BytesIO
 
 def get_lines_channel(conn:socket.socket):
     current_line=""
@@ -53,19 +54,17 @@ def server():
                                     print(body_file.read())  # Returns bytes
                                 except LookupError:
                                     raise LookupError
-                        
                             # handle_req(conn,request)
-                            status_line,response_headers=serve_response(request)
-                            body=b"Here is your response"
-                            response = (
-                                    status_line.encode("utf-8")
-                                    + b"\r\n"
-                                    + response_headers.encode("utf-8")
-                                    + b"\r\n"
-                                    + b"\r\n"
-                                    + body
-                                )
-                            conn.sendall(response)
+                            response_buffer=BytesIO()
+                            error=app_handler(response_buffer,request)
+                            if error is not None:
+                                error_response = write_error(
+                                                    error,
+                                                    request.request_line.http_version)
+                                conn.sendall(error_response.getvalue())
+                            else:
+                                response=serve_response(request,response_buffer)
+                                conn.sendall(response)
                 finally:
 
                     print("Connection is closed")
