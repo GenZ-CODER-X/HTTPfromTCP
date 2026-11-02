@@ -13,6 +13,28 @@ class HandlerError(BaseModel):
     status_code:StatusCode
     message:str
 
+class WriterState(Enum):
+    INITIALIZED="initialized"
+    WRITING_STATUS_LINE="writen_response_line"
+    PARSING_HEADERS = "writing_headers"
+    PARSING_BODY="writing-body"
+    DONE="done"
+
+class Writer():
+    def __init__(self,writer:BytesIO,http_version:str,state:WriterState):
+        writer:BytesIO
+        http_version:str="1.1"
+        state:WriterState=WriterState.INITIALIZED
+    
+    def write_status_line(self,Status:StatusCode):
+        status_line=(
+            f"HTTP/{self.http_version} "
+            f"{Status.value} "
+            f"{Status.value}"
+        )
+
+        self.state=WriterState.writen
+
 def serve_response(Request:Request,response_buffer:BytesIO)->tuple[str,str]:
     status_line = (
         f"HTTP/{Request.request_line.http_version} "
