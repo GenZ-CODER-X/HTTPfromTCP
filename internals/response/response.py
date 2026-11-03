@@ -18,7 +18,7 @@ class WriterState(Enum):
     INITIALIZED="initialized"
     STATUS_LINE_WRITTEN="written_status_line"
     HEADERS_WRITTEN = "written_headers"
-    BODY_WRITTEN="written_body"
+    WRITING_BODY_CHUNKS="writing_body_chunks"
     DONE="done"
 
 class Writer():
@@ -49,13 +49,29 @@ class Writer():
         self.writer.write(b"\r\n")
         self.state=WriterState.HEADERS_WRITTEN
     
-    def write_body(self,p:bytes)->int:
-        if self.state != WriterState.HEADERS_WRITTEN:
+    def write_chunked_body(self,p:bytes)->int:
+        if self.state not in( WriterState.HEADERS_WRITTEN,
+                             WriterState.WRITING_BODY_CHUNKS):
             raise RuntimeError("Write headers before body")
+        if not p:
+            raise ValueError("Use write_chunked_body_done() for termination")
+        hex_size = format(len(p),"x").encode("ascii")
+        self.writer.write(hex_size + b"\r\n")
         written = self.writer.write(p)
-        self.state = WriterState.BODY_WRITTEN
+        self.writer.write(b"\r\n")
+        self.state = WriterState.WRITING_BODY_CHUNKS
         return written
-
+    
+    def write_chunked_body_done(self)->int:
+        if self.state not in (
+            WriterState.STATUS_LINE_WRITTEN,
+            WriterState.WRITING_BODY_CHUNKS
+        ):
+            raise RuntimeError("Cannot finish chunked body in current state")
+        terminator=b"0\r\n\r\n"
+        written = self.writer.write(terminator)
+        self.state=WriterState.DONE
+        return written
 def app_handler(writer:Writer,request:Request)->None:
     path=request.request_line.request_target
     if path == "/yourproblem":
@@ -94,10 +110,17 @@ def app_handler(writer:Writer,request:Request)->None:
 </html>"""
     headers = Headers()
     headers.headers["Content-Type"] = "text/html"
-    headers.headers["Content-Length"] = len(body)
+    headers.headers["Transfer-Encoding"] = "chunked"
     writer.write_status_line(status)
     writer.write_headers_line(headers)
-    writer.write_body(body)
+    # Split HTML body into smaller chunks
+    chunk_size = 32
+    for i in range(0, len(body), chunk_size):
+        chunk = body[i:i + chunk_size]
+        writer.write_chunked_body(chunk)
+    
+    writer.write_chunked_body_done()
+
 
 #  HTTP-message   = start-line CRLF
 #                   *( field-line CRLF )
