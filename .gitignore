@@ -2,3 +2,4 @@ __pycache__/
 *.py[cod]
 .venv/
 .pytest_cache/git rm -r --cached internals/headers/__pycache__ internals/requests/__pycache__ tcplistener/__pycache__
+assets/

@@ -5,6 +5,7 @@ from io import BytesIO
 from http import HTTPStatus
 from internals.headers.headers import Headers
 import hashlib
+from pathlib import Path
 
 class StatusCode(Enum):
     OK=200 
@@ -74,8 +75,7 @@ class Writer():
             WriterState.WRITING_BODY_CHUNKS
         ):
             raise RuntimeError("Cannot finish chunked body in current state")
-        terminator=b"0\r\n\r\n"
-        written = self.writer.write(terminator)
+        written = self.writer.write(b"0\r\n")
         self.state=WriterState.WRITING_TRAILERS
         return written
     
@@ -89,6 +89,7 @@ class Writer():
     
 def app_handler(writer:Writer,request:Request)->None:
     path=request.request_line.request_target
+    headers = Headers()
     if path == "/yourproblem":
         status = StatusCode.BAD_REQUEST
         body = b"""<html>
@@ -101,7 +102,7 @@ def app_handler(writer:Writer,request:Request)->None:
   </body>
 </html>"""
 
-    if path == "/myproblem":
+    elif path == "/myproblem":
         status = StatusCode.INTERNAL_SERVER_ERROR
         body = b"""<html>
   <head>
@@ -112,6 +113,34 @@ def app_handler(writer:Writer,request:Request)->None:
     <p>Okay, you know what? This one is on me.</p>
   </body>
 </html>"""
+    elif path == "/video":
+        status = StatusCode.OK
+        headers.headers["Content-Type"] = "video/mp4"
+        headers.headers["Transfer-Encoding"] = "chunked"
+        headers.headers["Trailer"] = (
+            "X-Content-SHA256, X-Content-Length"
+        )
+        writer.write_status_line(status)
+        writer.write_headers_line(headers)
+        video_path = Path("assets/vim.mp4")
+        hasher = hashlib.sha256()
+        body_length = 0
+        with video_path.open("rb") as video:
+            while True:
+                chunk = video.read(64 * 1024)
+                if not chunk:
+                    break
+                writer.write_chunked_body(chunk)
+                hasher.update(chunk)
+                body_length += len(chunk)
+        writer.write_chunked_body_done()
+
+        trailers = Headers()
+        trailers.headers["X-Content-SHA256"] = hasher.hexdigest()
+        trailers.headers["X-Content-Length"] = str(body_length)
+
+        writer.write_trailers(trailers)
+
     else:
         status = StatusCode.OK
         body = b"""<html>
@@ -123,27 +152,26 @@ def app_handler(writer:Writer,request:Request)->None:
     <p>Your request was an absolute banger.</p>
   </body>
 </html>"""
-    headers = Headers()
-    headers.headers["Content-Type"] = "text/html"
-    headers.headers["Transfer-Encoding"] = "chunked"
-    headers.headers["Trailer" ]= "X-Content-SHA256, X-Content-Length"
-    writer.write_status_line(status)
-    writer.write_headers_line(headers)
-    # Split HTML body into smaller chunks
-    chunk_size = 32
-    hasher = hashlib.sha256()
-    body_length=0
-    for i in range(0, len(body), chunk_size):
-        chunk = body[i:i + chunk_size]
-        writer.write_chunked_body(chunk)
-        hasher.update(chunk)
-        body_length += len(chunk)
-    hash_value = hasher.hexdigest()
-    writer.write_chunked_body_done()
-    trailers = Headers()
-    trailers.headers["X-Content-SHA256"]= hash_value
-    trailers.headers["X-Content-Length"]= str(body_length)
-    writer.write_trailers(trailers)
+        headers.headers["Content-Type"] = "text/html"
+        headers.headers["Transfer-Encoding"] = "chunked"
+        headers.headers["Trailer" ]= "X-Content-SHA256, X-Content-Length"
+        writer.write_status_line(status)
+        writer.write_headers_line(headers)
+        # Split HTML body into smaller chunks
+        chunk_size = 32
+        hasher = hashlib.sha256()
+        body_length=0
+        for i in range(0, len(body), chunk_size):
+            chunk = body[i:i + chunk_size]
+            writer.write_chunked_body(chunk)
+            hasher.update(chunk)
+            body_length += len(chunk)
+        hash_value = hasher.hexdigest()
+        writer.write_chunked_body_done()
+        trailers = Headers()
+        trailers.headers["X-Content-SHA256"]= hash_value
+        trailers.headers["X-Content-Length"]= str(body_length)
+        writer.write_trailers(trailers)
 
 #  HTTP-message   = start-line CRLF
 #                   *( field-line CRLF )

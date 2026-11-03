@@ -62,7 +62,14 @@ def server():
                                     )
                             app_handler(writer,request)
                             response=response_buffer.getvalue()
-                            conn.sendall(response)
+                            try:
+                                conn.sendall(response)
+                                print(f"Successfully sent {len(response)} bytes")
+                            except BrokenPipeError:
+                                print("Client closed the connection before response completed")
+
+                            except ConnectionResetError:
+                                print("Client reset the connection")
                 finally:
 
                     print("Connection is closed")
