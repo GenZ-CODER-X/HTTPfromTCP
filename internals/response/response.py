@@ -3,6 +3,7 @@ from internals.requests.request import Request
 from pydantic import BaseModel
 from io import BytesIO
 from http import HTTPStatus
+from internals.headers.headers import Headers
 
 class StatusCode(Enum):
     OK=200 
@@ -15,99 +16,88 @@ class HandlerError(BaseModel):
 
 class WriterState(Enum):
     INITIALIZED="initialized"
-    WRITING_STATUS_LINE="writen_response_line"
-    PARSING_HEADERS = "writing_headers"
-    PARSING_BODY="writing-body"
+    STATUS_LINE_WRITTEN="written_status_line"
+    HEADERS_WRITTEN = "written_headers"
+    BODY_WRITTEN="written_body"
     DONE="done"
 
 class Writer():
-    def __init__(self,writer:BytesIO,http_version:str,state:WriterState):
-        writer:BytesIO
-        http_version:str="1.1"
-        state:WriterState=WriterState.INITIALIZED
+    def __init__(self,writer:BytesIO,http_version:str):
+        self.writer = writer
+        self.http_version = http_version
+        self.state = WriterState.INITIALIZED
     
-    def write_status_line(self,Status:StatusCode):
+    def write_status_line(self,status_code:StatusCode)->None:
+        if self.state != WriterState.INITIALIZED:
+            raise RuntimeError("Status line must be written first")
+        status = HTTPStatus(status_code.value)
         status_line=(
             f"HTTP/{self.http_version} "
-            f"{Status.value} "
-            f"{Status.value}"
+            f"{status.value} "
+            f"{status.phrase}"
         )
+        self.writer.write((status_line + "\r\n").encode("utf-8"))
+        self.state=WriterState.STATUS_LINE_WRITTEN
 
-        self.state=WriterState.writen
+    def write_headers_line(self,headers:Headers)->None:
+        if self.state != WriterState.STATUS_LINE_WRITTEN:
+            raise RuntimeError("Write status line before headers")
+        headers_list=[]
+        for key,value in headers.headers.items():
+            header = f"{key}: {value}\r\n"
+            self.writer.write(header.encode("utf-8"))
+        self.writer.write(b"\r\n")
+        self.state=WriterState.HEADERS_WRITTEN
+    
+    def write_body(self,p:bytes)->int:
+        if self.state != WriterState.HEADERS_WRITTEN:
+            raise RuntimeError("Write headers before body")
+        written = self.writer.write(p)
+        self.state = WriterState.BODY_WRITTEN
+        return written
 
-def serve_response(Request:Request,response_buffer:BytesIO)->tuple[str,str]:
-    status_line = (
-        f"HTTP/{Request.request_line.http_version} "
-        f"{StatusCode.OK.value} "
-        f"{StatusCode.OK.name}"
-    )
-    body=response_buffer.getvalue()
-    content_type = "text/plain"
-    response_headers = (
-        f"Content-Type: {content_type}\r\n"
-        f"Content-Length: {len(body)}"
-    )
-    response = (status_line.encode("utf-8")
-                        + b"\r\n"
-                        + response_headers.encode("utf-8")
-                        + b"\r\n"
-                        + b"\r\n"
-                        + body
-                        )
-    return response
-
-def app_handler(w:BytesIO,request:Request)->HandlerError|None:
+def app_handler(writer:Writer,request:Request)->None:
     path=request.request_line.request_target
     if path == "/yourproblem":
-        return HandlerError(
-            status_code=StatusCode.BAD_REQUEST,
-            message="Your problem is not my problem\n"
-        )
+        status = StatusCode.BAD_REQUEST
+        body = b"""<html>
+  <head>
+    <title>400 Bad Request</title>
+  </head>
+  <body>
+    <h1>Bad Request</h1>
+    <p>Your request honestly kinda sucked.</p>
+  </body>
+</html>"""
+
     if path == "/myproblem":
-        return HandlerError(
-            status_code=StatusCode.INTERNAL_SERVER_ERROR,
-            message="Woopsie, my bad\n"
-        )
-    body="All good frfr\n"
-    w.write(body.encode('utf-8'))
-    return None
-
-#Need to make write_error to write complete error http_response
-def write_error(error:HandlerError,http_version)->BytesIO:
-    body=error.message.encode("utf-8")
-    status = HTTPStatus(error.status_code.value)
-    error_response_line=(
-        f"HTTP/{http_version} "
-        f"{status.value} "
-        f"{status.phrase}"
-    )
-    
-    content_type="text/plain"
-    response_headers=(
-        f"Content-Type: {content_type}\r\n"
-        f"Content-Length: {len(body)}"
-    )
-    error_response=response = (
-                                error_response_line.encode("utf-8")
-                                + b"\r\n"
-                                + response_headers.encode("utf-8")
-                                + b"\r\n"
-                                + b"\r\n"
-                                + body
-                                )
-    w=BytesIO()
-    w.write(error_response)
-    return w
-
-
-
-
-
-
-
-
-
-
+        status = StatusCode.INTERNAL_SERVER_ERROR
+        body = b"""<html>
+  <head>
+    <title>500 Internal Server Error</title>
+  </head>
+  <body>
+    <h1>Internal Server Error</h1>
+    <p>Okay, you know what? This one is on me.</p>
+  </body>
+</html>"""
+    else:
+        status = StatusCode.OK
+        body = b"""<html>
+  <head>
+    <title>200 OK</title>
+  </head>
+  <body>
+    <h1>Success!</h1>
+    <p>Your request was an absolute banger.</p>
+  </body>
+</html>"""
+    headers = Headers()
+    headers.headers["Content-Type"] = "text/html"
+    headers.headers["Content-Length"] = len(body)
+    writer.write_status_line(status)
+    writer.write_headers_line(headers)
+    writer.write_body(body)
 
 #  HTTP-message   = start-line CRLF
 #                   *( field-line CRLF )
