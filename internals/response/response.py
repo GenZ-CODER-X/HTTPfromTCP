@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from io import BytesIO
 from http import HTTPStatus
 from internals.headers.headers import Headers
+import hashlib
 
 class StatusCode(Enum):
     OK=200 
@@ -19,14 +20,20 @@ class WriterState(Enum):
     STATUS_LINE_WRITTEN="written_status_line"
     HEADERS_WRITTEN = "written_headers"
     WRITING_BODY_CHUNKS="writing_body_chunks"
+    WRITING_TRAILERS="writing_trailers"
     DONE="done"
 
 class Writer():
     def __init__(self,writer:BytesIO,http_version:str):
         self.writer = writer
         self.http_version = http_version
+        self.body_length = int
         self.state = WriterState.INITIALIZED
-    
+    def _write_header_fields(self, headers: Headers) -> None:
+        for key, value in headers.headers.items():
+            header = f"{key}: {value}\r\n"
+            self.writer.write(header.encode("utf-8"))
+        
     def write_status_line(self,status_code:StatusCode)->None:
         if self.state != WriterState.INITIALIZED:
             raise RuntimeError("Status line must be written first")
@@ -39,15 +46,14 @@ class Writer():
         self.writer.write((status_line + "\r\n").encode("utf-8"))
         self.state=WriterState.STATUS_LINE_WRITTEN
 
-    def write_headers_line(self,headers:Headers)->None:
+    def write_headers_line(self, headers: Headers) -> None:
         if self.state != WriterState.STATUS_LINE_WRITTEN:
             raise RuntimeError("Write status line before headers")
-        headers_list=[]
-        for key,value in headers.headers.items():
-            header = f"{key}: {value}\r\n"
-            self.writer.write(header.encode("utf-8"))
+
+        self._write_header_fields(headers)
         self.writer.write(b"\r\n")
-        self.state=WriterState.HEADERS_WRITTEN
+
+        self.state = WriterState.HEADERS_WRITTEN
     
     def write_chunked_body(self,p:bytes)->int:
         if self.state not in( WriterState.HEADERS_WRITTEN,
@@ -70,8 +76,17 @@ class Writer():
             raise RuntimeError("Cannot finish chunked body in current state")
         terminator=b"0\r\n\r\n"
         written = self.writer.write(terminator)
-        self.state=WriterState.DONE
+        self.state=WriterState.WRITING_TRAILERS
         return written
+    
+    def write_trailers(self, trailers: Headers) -> None:
+        if self.state != WriterState.WRITING_TRAILERS:
+            raise RuntimeError("Chunked body must finish before trailers")
+
+        self._write_header_fields(trailers)
+        self.writer.write(b"\r\n")
+        self.state = WriterState.DONE
+    
 def app_handler(writer:Writer,request:Request)->None:
     path=request.request_line.request_target
     if path == "/yourproblem":
@@ -111,16 +126,24 @@ def app_handler(writer:Writer,request:Request)->None:
     headers = Headers()
     headers.headers["Content-Type"] = "text/html"
     headers.headers["Transfer-Encoding"] = "chunked"
+    headers.headers["Trailer" ]= "X-Content-SHA256, X-Content-Length"
     writer.write_status_line(status)
     writer.write_headers_line(headers)
     # Split HTML body into smaller chunks
     chunk_size = 32
+    hasher = hashlib.sha256()
+    body_length=0
     for i in range(0, len(body), chunk_size):
         chunk = body[i:i + chunk_size]
         writer.write_chunked_body(chunk)
-    
+        hasher.update(chunk)
+        body_length += len(chunk)
+    hash_value = hasher.hexdigest()
     writer.write_chunked_body_done()
-
+    trailers = Headers()
+    trailers.headers["X-Content-SHA256"]= hash_value
+    trailers.headers["X-Content-Length"]= str(body_length)
+    writer.write_trailers(trailers)
 
 #  HTTP-message   = start-line CRLF
 #                   *( field-line CRLF )
